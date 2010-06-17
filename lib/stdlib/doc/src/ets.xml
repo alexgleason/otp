@@ -1040,8 +1040,7 @@ ets:select(Table,MatchSpec),</code>
           </item>
           <item>
             <p><c>{write_concurrency,bool()}</c>
-              Performance tuning. Default is <c>false</c>, which means that the table
-              is optimized towards concurrent read access. An operation that
+              Performance tuning. Default is <c>false</c>. An operation that
               mutates (writes to) the table will obtain exclusive access,
               blocking any concurrent access of the same table until finished.
               If set to <c>true</c>, the table is optimized towards concurrent
@@ -1054,6 +1053,26 @@ ets:select(Table,MatchSpec),</code>
               <c>insert/2</c>) will gain less (or nothing) from this option.</p>
              <p>Table type <c>ordered_set</c> is not affected by this option in current
               implementation.</p>
+          </item>
+          <item><p><c>{read_concurrency,bool()}</c>
+              Performance tuning. Default is <c>false</c>. When set to
+	      <c>true</c>, the table is optimized for concurrent read
+	      operations. When this option is enabled on a runtime system with
+	      SMP support, read operations become much cheaper; especially on
+	      systems with multiple physical processors. However, switching
+	      between read and write operations becomes more expensive. You
+	      typically want to enable this option when concurrent read
+	      operations are much more frequent than write operations, or when
+	      concurrent reads and writes comes in large read and write
+	      bursts (i.e., lots of reads not interrupted by writes, and lots
+	      of writes not interrupted by reads). You typically do
+	      <em>not</em> want to enable this option when the common access
+	      pattern is a few read operations interleaved with a few write
+	      operations repeatedly. In this case you will get a performance
+	      degradation by enabling this option. The <c>read_concurrency</c>
+	      option can be combined with the <c>write_concurrency</c> option.
+	      You typically want to combine these when concurrent read and
+	      concurrent write bursts are common.</p>
           </item>
         </list>
       </desc>
