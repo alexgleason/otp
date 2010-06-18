@@ -273,6 +273,11 @@ Some of the available `configure` options are:
 *   `--with-ssl=PATH` - Specify location of OpenSSL include and lib
 *   `--{with,without}-ssl` - OpenSSL (without implies that the `crypto`,
     `ssh`, and `ssl` won't be built)
+*   `--with-libatomic_ops=PATH` - Use the `libatomic_ops` library for atomic
+    memory accesses. If `configure` should inform you about no native atomic
+    implementation available, you typically want to try using the
+    `libatomic_ops` library. It can be downloaded from
+    <http://www.hpl.hp.com/research/linux/atomic_ops/>.
 
 If you or your system has special requirements please read the `Makefile` for
 additional configuration information.

@@ -899,6 +899,51 @@ case "$THR_LIB_NAME" in
 	AC_MSG_RESULT([$ethr_have_gcc_atomic_ops])
 	test $ethr_have_gcc_atomic_ops = yes && AC_DEFINE(ETHR_HAVE_GCC_ATOMIC_OPS, 1, [Define if you have gcc atomic operations])
 
+	AC_MSG_CHECKING([for a usable libatomic_ops implementation])
+	case "x$with_libatomic_ops" in
+	    xno | xyes | x)
+		libatomic_ops_include=
+		;;
+	    *)
+		if test -d "${with_libatomic_ops}/include"; then
+		    libatomic_ops_include="-I$with_libatomic_ops/include"
+		    CPPFLAGS="$CPPFLAGS $libatomic_ops_include"
+		else
+		    AC_MSG_ERROR([libatomic_ops include directory $with_libatomic_ops/include not found])
+		fi;;
+	esac
+	ethr_have_libatomic_ops=no
+	AC_TRY_LINK([#include "atomic_ops.h"],
+		    [
+			volatile AO_t x;
+			AO_t y;
+			int z;
+
+			AO_nop_full();
+			AO_store(&x, (AO_t) 0);
+			z = AO_load(&x);
+			z = AO_compare_and_swap(&x, (AO_t) 0, (AO_t) 1);
+		    ],
+		    [ethr_have_native_atomics=yes
+		     ethr_have_libatomic_ops=yes])
+	AC_MSG_RESULT([$ethr_have_libatomic_ops])
+	if test $ethr_have_libatomic_ops = yes; then
+	    AC_CHECK_SIZEOF(AO_t, ,
+			    [
+				#include <stdio.h>
+				#include "atomic_ops.h"
+			    ])
+	    AC_DEFINE_UNQUOTED(ETHR_SIZEOF_AO_T, $ac_cv_sizeof_AO_t, [Define to the size of AO_t if libatomic_ops is used])
+
+	    AC_DEFINE(ETHR_HAVE_LIBATOMIC_OPS, 1, [Define if you have libatomic_ops atomic operations])
+	    if test "x$with_libatomic_ops" != "xno" && test "x$with_libatomic_ops" != "x"; then
+		AC_DEFINE(ETHR_PREFER_LIBATOMIC_OPS_NATIVE_IMPLS, 1, [Define if you prefer libatomic_ops native ethread implementations])
+	    fi
+	    ETHR_DEFS="$ETHR_DEFS $libatomic_ops_include"
+	elif test "x$with_libatomic_ops" != "xno" && test "x$with_libatomic_ops" != "x"; then
+	    AC_MSG_ERROR([No usable libatomic_ops implementation found])
+	fi
+
 	dnl Restore LIBS
 	LIBS=$saved_libs
 	dnl restore CPPFLAGS
@@ -939,6 +984,11 @@ AC_ARG_ENABLE(prefer-gcc-native-ethr-impls,
 
 test $enable_prefer_gcc_native_ethr_impls = yes &&
   AC_DEFINE(ETHR_PREFER_GCC_NATIVE_IMPLS, 1, [Define if you prefer gcc native ethread implementations])
+
+AC_ARG_WITH(libatomic_ops,
+	    AS_HELP_STRING([--with-libatomic_ops=PATH],
+			   [use libatomic_ops with the ethread library]))
+
 
 AC_DEFINE(ETHR_HAVE_ETHREAD_DEFINES, 1, \
 [Define if you have all ethread defines])

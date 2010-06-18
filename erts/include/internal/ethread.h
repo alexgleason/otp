@@ -698,6 +698,8 @@ ETHR_INLINE_FUNC_NAME_(ethr_write_lock)(ethr_rwlock_t *lock)
 #  if defined(__GNUC__)
 #    if defined(ETHR_PREFER_GCC_NATIVE_IMPLS)
 #      include "gcc/ethread.h"
+#    elif defined(ETHR_PREFER_LIBATOMIC_OPS_NATIVE_IMPLS)
+#      include "libatomic_ops/ethread.h"
 #    endif
 #    ifndef ETHR_HAVE_NATIVE_ATOMICS
 #      if ETHR_SIZEOF_PTR == 4
@@ -718,6 +720,7 @@ ETHR_INLINE_FUNC_NAME_(ethr_write_lock)(ethr_rwlock_t *lock)
 #        endif
 #      endif
 #      include "gcc/ethread.h"
+#      include "libatomic_ops/ethread.h"
 #    endif
 #  endif
 #endif /* !defined(ETHR_DISABLE_NATIVE_IMPLS) */

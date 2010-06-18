@@ -63,6 +63,15 @@
 /* Define if you prefer gcc native ethread implementations */
 #undef ETHR_PREFER_GCC_NATIVE_IMPLS
 
+/* Define if you have libatomic_ops atomic operations */
+#undef ETHR_HAVE_LIBATOMIC_OPS
+
+/* Define if you prefer libatomic_ops native ethread implementations */
+#undef ETHR_PREFER_LIBATOMIC_OPS_NATIVE_IMPLS
+
+/* Define to the size of AO_t if libatomic_ops is used */
+#undef ETHR_SIZEOF_AO_T
+
 /* Define if you want to turn on extra sanity checking in the ethread library */
 #undef ETHR_XCHK
 
