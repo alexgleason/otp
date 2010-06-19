@@ -48,7 +48,7 @@ ethr_event_destroy(ethr_event *e)
 }
 
 static ETHR_INLINE int
-wait(ethr_event *e, int spincount)
+wait__(ethr_event *e, int spincount)
 {
     unsigned sc = spincount;
     int res;
@@ -131,7 +131,7 @@ ethr_event_destroy(ethr_event *e)
 }
 
 static ETHR_INLINE int
-wait(ethr_event *e, int spincount)
+wait__(ethr_event *e, int spincount)
 {
     int sc = spincount;
     long val;
@@ -217,11 +217,11 @@ ethr_event_set(ethr_event *e)
 int
 ethr_event_wait(ethr_event *e)
 {
-    return wait(e, 0);
+    return wait__(e, 0);
 }
 
 int
 ethr_event_swait(ethr_event *e, int spincount)
 {
-    return wait(e, spincount);
+    return wait__(e, spincount);
 }
