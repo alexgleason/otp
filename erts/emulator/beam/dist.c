@@ -97,8 +97,7 @@ dist_msg_dbg(ErtsDistExternal *edep, char *what, byte *buf, int sz)
 #define PASS_THROUGH 'p'        /* This code should go */
 
 int erts_is_alive; /* System must be blocked on change */
-#define ERTS_DE_BUSY_LIMIT (128*1024)
-int dist_buf_busy_limit = ERTS_DE_BUSY_LIMIT;
+int erts_dist_buf_busy_limit;
 
 
 /* distribution trap functions */
@@ -1541,7 +1540,7 @@ dsig_send(ErtsDSigData *dsdp, Eterm ctl, Eterm msg, int force_busy)
 	ErtsProcList *plp = NULL;
 	erts_smp_spin_lock(&dep->qlock);
 	dep->qsize += size_obuf(obuf);
-	if (dep->qsize >= dist_buf_busy_limit)
+	if (dep->qsize >= erts_dist_buf_busy_limit)
 	    dep->qflgs |= ERTS_DE_QFLG_BUSY;
 	if (!force_busy && (dep->qflgs & ERTS_DE_QFLG_BUSY)) {
 	    erts_smp_spin_unlock(&dep->qlock);
@@ -1912,7 +1911,7 @@ erts_dist_command(Port *prt, int reds_limit)
 	ASSERT(dep->qsize >= obufsize);
 	dep->qsize -= obufsize;
 	obufsize = 0;
-	if (de_busy && !prt_busy && dep->qsize < dist_buf_busy_limit) {
+	if (de_busy && !prt_busy && dep->qsize < erts_dist_buf_busy_limit) {
 	    ErtsProcList *suspendees;
 	    int resumed;
 	    suspendees = get_suspended_on_de(dep, ERTS_DE_QFLG_BUSY);

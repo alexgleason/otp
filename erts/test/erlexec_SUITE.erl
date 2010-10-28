@@ -336,17 +336,18 @@ zdbbl_dist_buf_busy_limit(doc) ->
 zdbbl_dist_buf_busy_limit(suite) ->
     [];
 zdbbl_dist_buf_busy_limit(Config) when is_list(Config) ->
-    Max = 11222333,
+    LimKB = 1122233,
+    LimB = LimKB*1024,
     ?line {ok,[[PName]]} = init:get_argument(progname),
     ?line SNameS = "erlexec_test_02",
     ?line SName = list_to_atom(SNameS++"@"++
                          hd(tl(string:tokens(atom_to_list(node()),"@")))),
     ?line Cmd = PName ++ " -sname "++SNameS++" -setcookie "++
         atom_to_list(erlang:get_cookie()) ++
-	" +zdbbl " ++ integer_to_list(Max),
+	" +zdbbl " ++ integer_to_list(LimKB),
     ?line open_port({spawn,Cmd},[]),
     ?line pong = loop_ping(SName,40),
-    ?line Max = rpc:call(SName,erlang,system_info,[dist_buf_busy_limit]),
+    ?line LimB = rpc:call(SName,erlang,system_info,[dist_buf_busy_limit]),
     ?line ok = cleanup_node(SNameS, 10),
     ok.
     

@@ -151,8 +151,8 @@ bulk_send(Terms, BinSize) ->
     {comment, integer_to_list(trunc(Size/1024/Elapsed+0.5)) ++ " K/s"}.
 
 bulk_sendsend(Terms, BinSize) ->
-    {Rate1, MonitorCount1} = bulk_sendsend2(Terms, BinSize,   5000),
-    {Rate2, MonitorCount2} = bulk_sendsend2(Terms, BinSize, 995000),
+    {Rate1, MonitorCount1} = bulk_sendsend2(Terms, BinSize,   5),
+    {Rate2, MonitorCount2} = bulk_sendsend2(Terms, BinSize, 995),
     Ratio = if MonitorCount2 == 0 -> MonitorCount1 / 1.0;
                true               -> MonitorCount1 / MonitorCount2
             end,
@@ -179,10 +179,10 @@ bulk_sendsend2(Terms, BinSize, BusyBufSize) ->
     %% SLF LEFT OFF HERE.
     %% When the caller uses small hunks, like 4k via
     %% bulk_sendsend(32*5, 4), then (on my laptop at least), we get
-    %% zero monitor messages.  But if we use "+zdbbl 5000", then we
+    %% zero monitor messages.  But if we use "+zdbbl 5", then we
     %% get a lot of monitor messages.  So, if we can count up the
     %% total number of monitor messages that we get when running both
-    %% default busy size and "+zdbbl 5000", and if the 5000 case gets
+    %% default busy size and "+zdbbl 5", and if the 5 case gets
     %% "many many more" monitor messages, then we know we're working.
 
     ?line {ok, NodeSend} = start_node(bulk_sender, "+zdbbl " ++ integer_to_list(BusyBufSize)),

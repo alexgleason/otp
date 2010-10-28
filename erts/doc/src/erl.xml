@@ -912,22 +912,16 @@
         <taglist>
           <tag><marker id="+zdbbl"><c>+zdbbl size</c></marker></tag>
           <item>
-            <p>Set the value of <c><![CDATA[dist_buf_busy_limit]]></c>.</p>
-            <p>When large binaries are transmitted between nodes (or
-            simply a lot of medium-sized binaries), it is very easy to
-            hit the default 128KB limit.  Processes that use the
-            erlang:system_monitor() BIF to monitor system events can
-            be spammed by <c><![CDATA[{monitor, busy_dist_port,...}]]></c>
-            message tuples at rates of tens to even hundreds of
-            messages/second.</p>
+            <p>Set the distribution buffer busy limit
+	    (<seealso marker="erlang#system_info_dist_buf_busy_limit">dist_buf_busy_limit</seealso>)
+	    in kilobytes. Valid range is 1-2097151. Default is 128.</p>
             <p>A larger buffer limit will allow processes to buffer
             more outgoing messages over the distribution. When the
             buffer limit has been reached, sending processes will be
             suspended until the buffer size has shrunk. The buffer
             limit is per distribution channel. A higher limit will
-            give lower latency (and higher throughput?) at the expense
+            give lower latency and higher throughput at the expense
             of higher memory usage.</p>
-            <p>The default limit is 128 kilobytes.</p>
           </item>
         </taglist>
       </item>

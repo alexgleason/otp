@@ -1116,7 +1116,7 @@ usage_aux(void)
 	  "[+l] [+M<SUBSWITCH> <ARGUMENT>] [+P MAX_PROCS] [+R COMPAT_REL] "
 	  "[+r] [+rg READER_GROUPS_LIMIT] [+s SCHEDULER_OPTION] "
 	  "[+S NO_SCHEDULERS:NO_SCHEDULERS_ONLINE] [+T LEVEL] [+V] [+v] "
-	  "[+W<i|w>] [args ...]\n");
+	  "[+W<i|w>] [+z MISC_OPTION] [args ...]\n");
   exit(1);
 }
 
