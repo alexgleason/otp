@@ -1496,18 +1496,25 @@ static ERL_NIF_TERM consume_timeslice_nif(ErlNifEnv* env, int argc, const ERL_NI
 static ERL_NIF_TERM nif_sched2(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
     char s[64];
-    if (!enif_get_string(env, argv[0], s, sizeof s, ERL_NIF_LATIN1))
+    if (!enif_get_string(env, argv[2], s, sizeof s, ERL_NIF_LATIN1))
 	return enif_make_badarg(env);
-    return enif_make_tuple2(env, argv[1], argv[0]);
+    return enif_make_tuple2(env, argv[3], argv[2]);
 }
 
 static ERL_NIF_TERM nif_sched1(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
-    return enif_schedule_nif(env, "nif_sched2", 0, nif_sched2, argc, argv);
+    ERL_NIF_TERM new_argv[4];
+    new_argv[0] = enif_make_atom(env, "garbage0");
+    new_argv[1] = enif_make_atom(env, "garbage1");
+    new_argv[2] = argv[0];
+    new_argv[3] = argv[1];
+    return enif_schedule_nif(env, "nif_sched2", 0, nif_sched2, 4, new_argv);
 }
 
 static ERL_NIF_TERM call_nif_schedule(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 {
+    if (argc != 2)
+	return enif_make_atom(env, "false");
     return enif_schedule_nif(env, "nif_sched1", 0, nif_sched1, argc, argv);
 }
 

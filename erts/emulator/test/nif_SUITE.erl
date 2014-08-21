@@ -1531,10 +1531,10 @@ nif_schedule(Config) when is_list(Config) ->
     A = "this is a string",
     B = {this,is,a,tuple},
     {B,A} = call_nif_schedule(A, B),
-    ok = try call_nif_schedule(1, 1)
+    ok = try call_nif_schedule(1, 2)
 	 catch
 	     error:badarg ->
-		 [{?MODULE,call_nif_schedule,[1,1],_}|_] =
+		 [{?MODULE,call_nif_schedule,[1,2],_}|_] =
 		     erlang:get_stacktrace(),
 		 ok
 	 end,
