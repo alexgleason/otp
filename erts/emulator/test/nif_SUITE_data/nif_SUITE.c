@@ -23,6 +23,9 @@
 #include <string.h>
 #include <assert.h>
 #include <limits.h>
+#ifndef __WIN32__
+#include <unistd.h>
+#endif
 
 #include "nif_mod.h"
 
@@ -1574,8 +1577,6 @@ static ERL_NIF_TERM call_nif_schedule(ErlNifEnv* env, int argc, const ERL_NIF_TE
     return result;
 }
 
-#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT
-
 static int have_dirty_schedulers(void)
 {
     ErlNifSysInfo si;
@@ -1686,7 +1687,47 @@ static ERL_NIF_TERM call_dirty_nif_zero_args(ErlNifEnv* env, int argc, const ERL
     }
     return enif_make_list_from_array(env, result, i);
 }
+
+static ERL_NIF_TERM dirty_call_while_terminated_nif(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
+{
+    ErlNifPid self;
+    ERL_NIF_TERM result, self_term;
+    ErlNifPid to;
+    ErlNifEnv* menv;
+    int res;
+
+    if (!enif_get_local_pid(env, argv[0], &to))
+	return enif_make_badarg(env);
+
+    if (!enif_self(env, &self))
+	return enif_make_badarg(env);
+
+    self_term = enif_make_pid(env, &self);
+
+    result = enif_make_tuple2(env, enif_make_atom(env, "dirty_alive"), self_term);
+    menv = enif_alloc_env();
+    res = enif_send(env, &to, menv, result);
+    enif_free_env(menv);
+    if (!res)
+	return enif_make_badarg(env);
+
+    /* Wait until we have been killed */
+    while (enif_is_process_alive(env, &self))
+	;
+
+    result = enif_make_tuple2(env, enif_make_atom(env, "dirty_dead"), self_term);
+    menv = enif_alloc_env();
+    res = enif_send(env, &to, menv, result);
+    enif_free_env(menv);
+
+#ifdef __WIN32__
+    Sleep(1000);
+#else
+    sleep(1);
 #endif
+
+    return enif_make_atom(env, "ok");
+}
 
 /*
  * If argv[0] is the integer 0, call enif_make_badarg, but don't return its
@@ -2162,12 +2203,11 @@ static ErlNifFunc nif_funcs[] =
     {"otp_9828_nif", 1, otp_9828_nif},
     {"consume_timeslice_nif", 2, consume_timeslice_nif},
     {"call_nif_schedule", 2, call_nif_schedule},
-#ifdef ERL_NIF_DIRTY_SCHEDULER_SUPPORT
     {"call_dirty_nif", 3, call_dirty_nif},
     {"send_from_dirty_nif", 1, send_from_dirty_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"call_dirty_nif_exception", 1, call_dirty_nif_exception, ERL_NIF_DIRTY_JOB_IO_BOUND},
     {"call_dirty_nif_zero_args", 0, call_dirty_nif_zero_args, ERL_NIF_DIRTY_JOB_CPU_BOUND},
-#endif
+    {"dirty_call_while_terminated_nif", 1, dirty_call_while_terminated_nif, ERL_NIF_DIRTY_JOB_CPU_BOUND},
     {"call_nif_exception", 1, call_nif_exception},
     {"call_nif_nan_or_inf", 1, call_nif_nan_or_inf},
     {"call_nif_atom_too_long", 1, call_nif_atom_too_long},
