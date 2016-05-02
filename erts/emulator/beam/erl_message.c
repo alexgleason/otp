@@ -483,7 +483,6 @@ queue_messages(Process *c_p,
     erts_proc_notify_new_message(receiver, *receiver_locks);
 #else
     erts_proc_notify_new_message(receiver, 0);
-    ERTS_HOLE_CHECK(receiver);
 #endif
     return res;
 }
@@ -592,7 +591,9 @@ erts_try_alloc_message_on_heap(Process *pp,
 
     ASSERT(!(*psp & ERTS_PSFLG_OFF_HEAP_MSGQ));
 
-    if (
+    if ((*psp) & ERTS_PSFLGS_VOLATILE_HEAP)
+	goto in_message_fragment;
+    else if (
 #if defined(ERTS_SMP)
 	*plp & ERTS_PROC_LOCK_MAIN
 #else
@@ -602,7 +603,7 @@ erts_try_alloc_message_on_heap(Process *pp,
 #ifdef ERTS_SMP
     try_on_heap:
 #endif
-	if ((*psp & (ERTS_PSFLG_EXITING|ERTS_PSFLG_PENDING_EXIT))
+	if (((*psp) & ERTS_PSFLGS_VOLATILE_HEAP)
 	    || (pp->flags & F_DISABLE_GC)
 	    || HEAP_LIMIT(pp) - HEAP_TOP(pp) <= sz) {
 	    /*

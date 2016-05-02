@@ -411,13 +411,13 @@ get_match_pseudo_process(Process *c_p, Uint heap_size)
 {
     ErtsMatchPseudoProcess *mpsp;
 #ifdef ERTS_SMP
-    mpsp = (ErtsMatchPseudoProcess *) c_p->scheduler_data->match_pseudo_process;
+    mpsp = (ErtsMatchPseudoProcess *) erts_proc_sched_data(c_p)->match_pseudo_process;
     if (mpsp)
 	cleanup_match_pseudo_process(mpsp, 0);
     else {
 	ASSERT(erts_smp_tsd_get(match_pseudo_process_key) == NULL);
 	mpsp = create_match_pseudo_process();
-	c_p->scheduler_data->match_pseudo_process = (void *) mpsp;
+	erts_proc_sched_data(c_p)->match_pseudo_process = (void *) mpsp;
 	erts_smp_tsd_set(match_pseudo_process_key, (void *) mpsp);
     }
     ASSERT(mpsp == erts_smp_tsd_get(match_pseudo_process_key));
@@ -1771,7 +1771,7 @@ Eterm db_prog_match(Process *c_p, Binary *bprog,
     /* We need to lure the scheduler into believing in the pseudo process, 
        because of floating point exceptions. Do *after* mpsp is set!!! */
 
-    esdp = ERTS_GET_SCHEDULER_DATA_FROM_PROC(c_p);
+    esdp = erts_get_scheduler_data();
     ASSERT(esdp != NULL);
     current_scheduled = esdp->current_process;
     /* SMP: psp->scheduler_data is set by get_match_pseudo_process */
