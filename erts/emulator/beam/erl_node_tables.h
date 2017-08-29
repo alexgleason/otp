@@ -48,6 +48,9 @@
 #define ERTS_PORT_TASK_ONLY_BASIC_TYPES__
 #include "erl_port_task.h"
 #undef ERTS_PORT_TASK_ONLY_BASIC_TYPES__
+#define ERTS_BINARY_TYPES_ONLY__
+#include "erl_binary.h"
+#undef ERTS_BINARY_TYPES_ONLY__
 
 #define ERTS_NODE_TAB_DELAY_GC_DEFAULT (60)
 #define ERTS_NODE_TAB_DELAY_GC_MAX (100*1000*1000)
@@ -61,11 +64,17 @@
 #define ERTS_DE_SFLGS_ALL			(ERTS_DE_SFLG_CONNECTED \
 						 | ERTS_DE_SFLG_EXITING)
 
-#define ERTS_DE_QFLG_BUSY			(((Uint32) 1) <<  0)
-#define ERTS_DE_QFLG_EXIT			(((Uint32) 1) <<  1)
+#define ERTS_DE_QFLG_BUSY			(((erts_aint32_t) 1) <<  0)
+#define ERTS_DE_QFLG_EXIT			(((erts_aint32_t) 1) <<  1)
+#define ERTS_DE_QFLG_REQ_INFO			(((erts_aint32_t) 1) <<  2)
+#define ERTS_DE_QFLG_PORT_CTRL                  (((erts_aint32_t) 1) <<  3)
+#define ERTS_DE_QFLG_PROC_CTRL                  (((erts_aint32_t) 1) <<  4)
 
 #define ERTS_DE_QFLGS_ALL			(ERTS_DE_QFLG_BUSY \
-						 | ERTS_DE_QFLG_EXIT)
+						 | ERTS_DE_QFLG_EXIT \
+                                                 | ERTS_DE_QFLG_REQ_INFO \
+                                                 | ERTS_DE_QFLG_PORT_CTRL \
+                                                 | ERTS_DE_QFLG_PROC_CTRL)
 
 #if defined(ARCH_64)
 #define ERTS_DIST_OUTPUT_BUF_DBG_PATTERN ((Uint) 0xf713f713f713f713UL)
@@ -107,11 +116,11 @@ typedef struct dist_entry_ {
     HashBucket hash_bucket;     /* Hash bucket */
     struct dist_entry_ *next;	/* Next entry in dist_table (not sorted) */
     struct dist_entry_ *prev;	/* Previous entry in dist_table (not sorted) */
-    erts_smp_refc_t refc;		/* Reference count */
 
     erts_smp_rwmtx_t rwmtx;     /* Protects all fields below until lck_mtx. */
     Eterm sysname;		/* name@host atom for efficiency */
     Uint32 creation;		/* creation of connected node */
+    erts_smp_atomic_t input_handler; /* Input handler */
     Eterm cid;			/* connection handler (pid or port), NIL == free */
     Uint32 connection_id;	/* Connection id incremented on connect */
     Uint32 status;		/* Slot status, like exiting reserved etc */
@@ -133,11 +142,14 @@ typedef struct dist_entry_ {
     ErtsMonitor *monitors;      /* Monitor tree */
 
     erts_smp_mtx_t qlock;       /* Protects qflgs and out_queue */
-    Uint32 qflgs;
-    Sint qsize;
+    erts_smp_atomic32_t qflgs;
+    erts_smp_atomic_t qsize;
+    erts_smp_atomic64_t in;
+    erts_smp_atomic64_t out;
     ErtsDistOutputQueue out_queue;
     struct ErtsProcList_ *suspended;
 
+    ErtsDistOutputQueue tmp_out_queue;
     ErtsDistOutputQueue finalized_out_queue;
     erts_smp_atomic_t dist_cmd_scheduled;
     ErtsPortTaskHandle dist_cmd;
@@ -145,6 +157,8 @@ typedef struct dist_entry_ {
     Uint (*send)(Port *prt, ErtsDistOutputBuf *obuf);
 
     struct cache* cache;	/* The atom cache */
+
+    ErtsThrPrgrLaterOp later_op;
 } DistEntry;
 
 typedef struct erl_node_ {
@@ -194,8 +208,12 @@ Eterm erts_get_node_and_dist_references(struct process *);
 int erts_lc_is_de_rwlocked(DistEntry *);
 int erts_lc_is_de_rlocked(DistEntry *);
 #endif
+int erts_dist_entry_destructor(Binary *bin);
+DistEntry *erts_dhandle_to_dist_entry(Eterm dhandle);
+Eterm erts_make_dhandle(Process *c_p, DistEntry *dep);
+void erts_ref_dist_entry(DistEntry *dep);
+void erts_deref_dist_entry(DistEntry *dep);
 
-ERTS_GLB_INLINE void erts_deref_dist_entry(DistEntry *dep);
 ERTS_GLB_INLINE void erts_deref_node_entry(ErlNode *np);
 ERTS_GLB_INLINE void erts_smp_de_rlock(DistEntry *dep);
 ERTS_GLB_INLINE void erts_smp_de_runlock(DistEntry *dep);
@@ -205,14 +223,6 @@ ERTS_GLB_INLINE void erts_smp_de_links_lock(DistEntry *dep);
 ERTS_GLB_INLINE void erts_smp_de_links_unlock(DistEntry *dep);
 
 #if ERTS_GLB_INLINE_INCL_FUNC_DEF
-
-ERTS_GLB_INLINE void
-erts_deref_dist_entry(DistEntry *dep)
-{
-    ASSERT(dep);
-    if (erts_smp_refc_dectest(&dep->refc, 0) == 0)
-	erts_schedule_delete_dist_entry(dep);
-}
 
 ERTS_GLB_INLINE void
 erts_deref_node_entry(ErlNode *np)

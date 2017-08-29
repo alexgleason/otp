@@ -796,6 +796,11 @@ erts_pre_init_process(void)
         = ERTS_PSD_ETS_FIXED_TABLES_GET_LOCKS;
     erts_psd_required_locks[ERTS_PSD_ETS_FIXED_TABLES].set_locks
         = ERTS_PSD_ETS_FIXED_TABLES_SET_LOCKS;
+
+    erts_psd_required_locks[ERTS_PSD_DIST_ENTRY].get_locks
+        = ERTS_PSD_DIST_ENTRY_GET_LOCKS;
+    erts_psd_required_locks[ERTS_PSD_DIST_ENTRY].set_locks
+        = ERTS_PSD_DIST_ENTRY_SET_LOCKS;
 #endif
 }
 
@@ -13503,7 +13508,6 @@ static void doit_exit_monitor(ErtsMonitor *mon, void *vpcontext)
 		    }
 		    erts_destroy_monitor(rmon);
 		}
-		erts_deref_dist_entry(dep);
 	    }
 	} else {
             ASSERT(is_pid(mon->u.pid) || is_port(mon->u.pid));
@@ -13743,7 +13747,6 @@ static void doit_exit_link(ErtsLink *lnk, void *vpcontext)
 	    erts_smp_de_links_unlock(dep);
 	    if (rlnk)
 		erts_destroy_link(rlnk);
-	    erts_deref_dist_entry(dep);
 	}
 	break;
 	
@@ -13857,7 +13860,7 @@ erts_continue_exit_process(Process *p)
     ErtsMonitor *mon;
     ErtsProcLocks curr_locks = ERTS_PROC_LOCK_MAIN;
     Eterm reason = p->fvalue;
-    DistEntry *dep;
+    DistEntry *dep = NULL;
     erts_aint32_t state;
     int delay_del_proc = 0;
 
@@ -14064,13 +14067,16 @@ erts_continue_exit_process(Process *p)
 	if (refc_inced && !(n & ERTS_PSFLG_IN_RUNQ))
 	    erts_proc_dec_refc(p);
     }
-    
-    dep = (p->flags & F_DISTRIBUTION) ? erts_this_dist_entry : NULL;
+
+    dep = ((p->flags & F_DISTRIBUTION)
+           ? ERTS_PROC_SET_DIST_ENTRY(p, NULL)
+           : NULL);
 
     erts_smp_proc_unlock(p, ERTS_PROC_LOCKS_ALL);
 
     if (dep) {
-	erts_do_net_exits(dep, reason);
+        erts_do_net_exits(dep, (reason == am_kill) ? am_killed : reason);
+        erts_deref_dist_entry(dep);
     }
 
     /*
@@ -14484,3 +14490,24 @@ erts_dbg_check_halloc_lock(Process *p)
     return 0;
 }
 #endif
+
+void
+erts_debug_later_op_foreach(void (*callback)(void*),
+                            void (*func)(void *, ErtsThrPrgrVal, void *),
+                            void *arg)
+{
+    int six;
+    if (!erts_smp_thr_progress_is_blocking())
+	ERTS_INTERNAL_ERROR("Not blocking thread progress");
+
+    for (six = 0; six < erts_no_schedulers; six++) {
+        ErtsSchedulerData *esdp = &erts_aligned_scheduler_data[six].esd;
+	ErtsThrPrgrLaterOp *lop = esdp->aux_work_data.later_op.first;
+
+        while (lop) {
+            if (lop->func == callback)
+                func(arg, lop->later, lop->data);
+            lop = lop->next;
+        }
+    }
+}

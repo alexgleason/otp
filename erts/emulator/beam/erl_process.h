@@ -725,6 +725,11 @@ extern ErtsSchedulerData *erts_scheduler_data;
 int erts_smp_lc_runq_is_locked(ErtsRunQueue *);
 #endif
 
+void
+erts_debug_later_op_foreach(void (*callback)(void*),
+                            void (*func)(void *, ErtsThrPrgrVal, void *),
+                            void *arg);
+
 #ifdef ERTS_INCLUDE_SCHEDULER_INTERNALS
 
 #ifdef ERTS_SMP
@@ -835,14 +840,15 @@ erts_smp_reset_max_len(ErtsRunQueue *rq, ErtsRunQueueInfo *rqi)
 #define ERTS_PSD_NIF_TRAP_EXPORT		5
 #define ERTS_PSD_ETS_OWNED_TABLES               6
 #define ERTS_PSD_ETS_FIXED_TABLES               7
-#define ERTS_PSD_SUSPENDED_SAVED_CALLS_BUF	8
+#define ERTS_PSD_DIST_ENTRY	                8
+#define ERTS_PSD_SUSPENDED_SAVED_CALLS_BUF	9 /* keep last... */
 
-#define ERTS_PSD_SIZE				9
+#define ERTS_PSD_SIZE				10
 
 #if !defined(HIPE)
 #  undef ERTS_PSD_SUSPENDED_SAVED_CALLS_BUF
 #  undef ERTS_PSD_SIZE
-#  define ERTS_PSD_SIZE 8
+#  define ERTS_PSD_SIZE 9
 #endif
 
 typedef struct {
@@ -875,6 +881,9 @@ typedef struct {
 
 #define ERTS_PSD_ETS_FIXED_TABLES_GET_LOCKS ERTS_PROC_LOCK_MAIN
 #define ERTS_PSD_ETS_FIXED_TABLES_SET_LOCKS ERTS_PROC_LOCK_MAIN
+
+#define ERTS_PSD_DIST_ENTRY_GET_LOCKS ERTS_PROC_LOCK_MAIN
+#define ERTS_PSD_DIST_ENTRY_SET_LOCKS ERTS_PROC_LOCK_MAIN
 
 typedef struct {
     ErtsProcLocks get_locks;
@@ -2102,6 +2111,11 @@ erts_psd_set(Process *p, int ix, void *data)
     erts_psd_get((P), ERTS_PSD_NIF_TRAP_EXPORT)
 #define ERTS_PROC_SET_NIF_TRAP_EXPORT(P, NTE) \
     erts_psd_set((P), ERTS_PSD_NIF_TRAP_EXPORT, (void *) (NTE))
+
+#define ERTS_PROC_GET_DIST_ENTRY(P) \
+    ((DistEntry *) erts_psd_get((P), ERTS_PSD_DIST_ENTRY))
+#define ERTS_PROC_SET_DIST_ENTRY(P, DE) \
+    ((DistEntry *) erts_psd_set((P), ERTS_PSD_DIST_ENTRY, (void *) (DE)))
 
 #ifdef HIPE
 #define ERTS_PROC_GET_SUSPENDED_SAVED_CALLS_BUF(P) \
