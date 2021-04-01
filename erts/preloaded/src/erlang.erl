@@ -2499,7 +2499,7 @@ send(_Dest,_Msg) ->
 -spec erlang:send(Dest, Msg, Options) -> Res when
       Dest :: dst(),
       Msg :: term(),
-      Options :: [nosuspend | noconnect],
+      Options :: [nosuspend | noconnect | prepend],
       Res :: ok | nosuspend | noconnect.
 send(_Dest,_Msg,_Options) ->
     erlang:nif_error(undefined).

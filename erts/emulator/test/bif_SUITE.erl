@@ -41,7 +41,9 @@
          os_env_case_sensitivity/1,
          test_length/1,
          fixed_apply_badarg/1,
-         external_fun_apply3/1]).
+         external_fun_apply3/1,
+	 send_prepend_basic/1,
+	 send_prepend_recv_mark/1]).
 
 suite() ->
     [{ct_hooks,[ts_install_cth]},
@@ -57,7 +59,8 @@ all() ->
      error_stacktrace, error_stacktrace_during_call_trace,
      group_leader_prio, group_leader_prio_dirty,
      is_process_alive, process_info_blast, os_env_case_sensitivity,
-     test_length,fixed_apply_badarg,external_fun_apply3].
+     test_length,fixed_apply_badarg,external_fun_apply3,
+     send_prepend_basic, send_prepend_recv_mark].
 
 init_per_testcase(guard_bifs_in_erl_bif_types, Config) when is_list(Config) ->
     skip_missing_erl_bif_types(Config);
@@ -1351,7 +1354,116 @@ external_fun_apply3(_Config) ->
 
     ok.
 
+send_prepend_basic(Config) when is_list(Config) ->
+    Me = self(),
+    {Pid, Mon} = spawn_monitor(fun () ->
+				       send_prepend_basic_send(Me, 4)
+			       end),
+    receive
+	{'DOWN', Mon, process, Pid, normal} ->
+	    ok
+    end,
+    {messages, Msgs} = process_info(self(), messages),
+    io:format("Msgs = ~p~n", [Msgs]),
+    Msgs = recv_all([]),
+    Msgs = [{prepend, 1}, {prepend, 2}, {prepend, 3}, {prepend, 4},
+	    {append, 4}, {append, 3}, {append, 2}, {append, 1}],
+    ok.
+
+send_prepend_basic_send(_To, 0) ->
+    ok;
+send_prepend_basic_send(To, N) ->
+    erlang:send(To, {prepend, N}, [prepend]),
+    To ! {append, N},
+    send_prepend_basic_send(To, N-1).
+
+send_prepend_recv_mark(Config) when is_list(Config) ->
+    Srv = spawn_link(fun send_prepend_server/0),
+    Hello = fun () ->
+		    Srv ! {self(), append_reply, hello},
+		    recv_msg(hello)
+	    end,
+    HelloPrepend = fun () ->
+			   Srv ! {self(), prepend_reply, hello},
+			   recv_msg(hello)
+	    end,
+    Hello(),
+    {HelloEmpty, ok} = tc(Hello),
+    lists:foreach(fun (_) ->
+			  self() ! garbage_message
+		  end,
+		  lists:seq(1, 10000000)),
+    {HelloFull, ok} = tc(Hello),
+    {RecvMarkFull, ok} = tc(fun () ->
+				    Ref = make_ref(),
+				    Srv ! {self(), append_reply, Ref},
+				    recv_msg(Ref)
+			    end),
+    {DoubleHelloFullPrepend, ok} = tc(fun () ->
+					      HelloPrepend(),
+					      HelloPrepend()
+				      end),
+    {ClearedRecvMarkFull, ok} = tc(fun () ->
+					   Ref = make_ref(),
+					   %% Prepended message should clear
+					   %% recv marker for Ref reply...
+					   HelloPrepend(),
+					   Srv ! {self(), append_reply, Ref},
+					   recv_msg(Ref)
+				   end),
+    {NotClearedRecvMarkFull, ok} = tc(fun () ->
+					      %% Prepended message should
+					      %% not clear recv marker for
+					      %% Ref reply...
+					      HelloPrepend(),
+					      Ref = make_ref(),
+					      Srv ! {self(), append_reply, Ref},
+					      recv_msg(Ref)
+				      end),
+    io:format("HelloEmpty: ~p ns~nHelloFull: ~p ns~nRecvMarkFull: ~p ns~n"
+	      ++ "DoubleHelloFullPrepend: ~p ns~nClearedRecvMarkFull: ~p ns~n"
+	      ++ "NotClearedRecvMarkFull: ~p ns~n",
+	      [HelloEmpty, HelloFull, RecvMarkFull, DoubleHelloFullPrepend,
+	       ClearedRecvMarkFull, NotClearedRecvMarkFull]),
+    true = RecvMarkFull < HelloFull div 10,
+    true = DoubleHelloFullPrepend < HelloFull div 10,
+    true = ClearedRecvMarkFull > HelloFull div 2,
+    true = NotClearedRecvMarkFull < HelloFull div 10,
+    unlink(Srv),
+    exit(Srv, kill),
+    false = erlang:is_process_alive(Srv),
+    ok.
+
+tc(Fun) ->
+    Start = erlang:monotonic_time(nanosecond),
+    Res = Fun(),
+    End = erlang:monotonic_time(nanosecond),
+    {End - Start, Res}.
+
+send_prepend_server() ->
+    receive
+	{From, append_reply, Reply} ->
+	    From ! Reply;
+	{From, prepend_reply, Reply} ->
+	    erlang:send(From, Reply, [prepend])
+    end,
+    send_prepend_server().
+
 %% helpers
+
+recv_msg(Msg) ->
+    receive
+	Msg ->
+	    ok
+    end.
+
+recv_all(Msgs) ->
+    receive
+	Msg ->
+	    recv_all([Msg|Msgs])
+    after 0 ->
+	    lists:reverse(Msgs)
+    end.
     
 id(I) -> I.
 

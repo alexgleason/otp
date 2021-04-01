@@ -1275,6 +1275,57 @@ get_alias_msg_data(ErtsMessage *sig, Eterm *fromp, Eterm *aliasp,
     return type;
 }
 
+static ERTS_INLINE int
+get_prepend_msg_data(ErtsMessage *sig, Eterm *fromp,
+		     Eterm *msgp, void **attachedp)
+{
+    int type = ERTS_PROC_SIG_TYPE(((ErtsSignal *) sig)->common.tag);
+    Eterm *tp;
+
+    ASSERT(is_tuple_arity(ERL_MESSAGE_FROM(sig), 2)
+           || is_tuple_arity(ERL_MESSAGE_FROM(sig), 4));
+
+    tp = tuple_val(ERL_MESSAGE_FROM(sig));
+    if (fromp)
+        *fromp = tp[1];
+    if (msgp)
+        *msgp = tp[2];
+
+    if (!attachedp)
+        return type;
+
+    if (is_tuple_arity(ERL_MESSAGE_FROM(sig), 2)) {
+        if (type == ERTS_SIG_Q_TYPE_HEAP)
+            *attachedp = NULL;
+        else {
+            ASSERT(type == ERTS_SIG_Q_TYPE_OFF_HEAP);
+            *attachedp = ERTS_MSG_COMBINED_HFRAG;
+        }
+    }
+    else {
+        Uint low, high;
+        ASSERT(type == ERTS_SIG_Q_TYPE_HEAP_FRAG);
+        /*
+         * Heap fragment pointer in element 3 and 4. See
+         * erts_proc_sig_send_prepend_msg().
+         */
+        low = unsigned_val(tp[3]);
+        high = unsigned_val(tp[4]);
+#ifdef ARCH_64
+        ASSERT((((Uint) 1) << 32) > low);
+        ASSERT((((Uint) 1) << 32) > high);
+        *attachedp = (void *) ((((Uint) high) << 32) | ((Uint) low));
+#else /* ARCH_32 */
+        ASSERT((((Uint) 1) << 16) > low);
+        ASSERT((((Uint) 1) << 16) > high);
+        *attachedp = (void *) ((((Uint) high) << 16) | ((Uint) low));
+#endif
+        ASSERT(*attachedp != NULL);
+    }
+
+    return type;
+}
+
 void
 erts_proc_sig_cleanup_non_msg_signal(ErtsMessage *sig)
 {
@@ -1282,7 +1333,8 @@ erts_proc_sig_cleanup_non_msg_signal(ErtsMessage *sig)
     Eterm tag = ((ErtsSignal *) sig)->common.tag;
     
     /*
-     * Heap alias message and heap frag alias message
+     * Heap alias message, heap frag alias message
+     * heap prepend message, and heap frag prepend message
      * signals are the only non-message signals, which are
      * allocated as messages, which do not use a combined
      * message / heap fragment.
@@ -1292,10 +1344,21 @@ erts_proc_sig_cleanup_non_msg_signal(ErtsMessage *sig)
         return;
     }
 
+    if (ERTS_SIG_IS_HEAP_PREPEND_MSG_TAG(tag)) {
+        sig->data.heap_frag = NULL;
+	return;
+    }
+
     if(ERTS_SIG_IS_HEAP_FRAG_ALIAS_MSG_TAG(tag)) {
         /* Retreive pointer to heap fragment (may not be NULL). */
         void *attached;
         (void) get_alias_msg_data(sig, NULL, NULL, NULL, &attached);
+        sig->data.heap_frag = hfrag = (ErlHeapFragment *) attached;
+        ASSERT(hfrag);
+    }
+    else if (ERTS_SIG_IS_HEAP_FRAG_PREPEND_MSG_TAG(tag)) {
+        void *attached;
+	(void) get_prepend_msg_data(sig, NULL, NULL, &attached);
         sig->data.heap_frag = hfrag = (ErlHeapFragment *) attached;
         ASSERT(hfrag);
     }
@@ -1543,6 +1606,155 @@ erts_proc_sig_send_dist_to_alias(Eterm alias, ErtsDistExternal *edep,
     
 }
 
+void
+erts_proc_sig_send_prepend_msg(Process *c_p, Eterm from, Eterm to, Eterm msg, Eterm token)
+{
+    Process *rp;
+    ErlHeapFragment *hfrag;
+    ErtsProcLocks rp_locks = 0;
+    erts_aint32_t rp_state;
+    ErtsMessage *mp;
+    ErlOffHeap *ohp;
+    Uint hsz, token_sz, msg_sz;
+    Eterm *hp, token_copy, msg_copy;
+    int type;
+#ifdef USE_VM_PROBES
+    Eterm utag_copy, utag;
+    Uint utag_sz;
+#endif
+
+    ASSERT(is_internal_pid(to));
+    ASSERT(is_internal_pid(from));
+    
+    if (IS_TRACED_FL(c_p, F_TRACE_SEND))
+        trace_send(c_p, to, msg);
+    if (ERTS_PROC_GET_SAVED_CALLS_BUF(c_p))
+        save_calls(c_p, &exp_send);
+
+    rp = erts_proc_lookup(to);
+    if (!rp)
+        return;
+
+    rp_locks = c_p == rp ? ERTS_PROC_LOCK_MAIN : 0;
+
+    hsz = 0;
+
+    if (c_p && have_seqtrace(token)) {
+        seq_trace_update_serial(c_p);
+	seq_trace_output(token, msg, SEQ_TRACE_SEND, to, c_p);
+    }
+
+#ifdef USE_VM_PROBES
+    utag_sz = 0;
+    utag = NIL;
+    if (c_p && token != NIL && (DT_UTAG_FLAGS(c_p) & DT_UTAG_SPREADING)) {
+        utag_sz = size_object(DT_UTAG(c_p));
+        utag = DT_UTAG(c_p);
+    }
+    else if (token == am_have_dt_utag) {
+        token = NIL;
+    }
+    hsz += utag_sz;
+#endif
+
+    msg_sz = size_object(msg);
+    hsz += msg_sz;
+
+    token_sz = size_object(token);
+    hsz += token_sz;
+
+    rp_state = erts_atomic32_read_nob(&rp->state);
+    if (rp_state & ERTS_PSFLG_OFF_HEAP_MSGQ) {
+        type = ERTS_SIG_Q_TYPE_OFF_HEAP;
+        hsz += 3; /* 2-tuple containing from, and message */
+	mp = erts_alloc_message(hsz, &hp);
+	ohp = &mp->hfrag.off_heap;
+        hfrag = NULL;
+    }
+    else {
+        int on_heap;
+        hsz += 5; /*
+                   * 4-tuple containing from, message, high part
+                   * of heap frag address, and low part of heap frag
+                   * address. If we manage to allocate on the heap, we
+                   * omit the heap frag address elements and use a
+                   * 2-tuple instead.
+                   */
+        mp = erts_try_alloc_message_on_heap(rp, &rp_state, &rp_locks,
+                                            hsz, &hp, &ohp, &on_heap);
+        if (!on_heap) {
+            type = ERTS_SIG_Q_TYPE_HEAP_FRAG;
+            hfrag = mp->data.heap_frag;
+            ASSERT(hfrag);
+        }
+        else {
+            /* no need to save heap fragment pointer... */
+            Eterm *tmp_hp, *end_hp;
+            type = ERTS_SIG_Q_TYPE_HEAP;
+            end_hp = hp + hsz;
+            tmp_hp = end_hp - 2;
+            HRelease(rp, end_hp, tmp_hp);
+            hfrag = NULL;
+        }
+    }
+
+    mp->next = NULL;
+
+    msg_copy = copy_struct(msg, msg_sz, &hp, ohp);
+    token_copy = copy_struct(token, token_sz, &hp, ohp);
+#ifdef USE_VM_PROBES
+    utag_copy = (is_immed(utag)
+                 ? utag
+                 : copy_struct(utag, utag_sz, &hp, ohp));
+    ERL_MESSAGE_DT_UTAG(mp) = utag_copy;
+#endif
+
+    ERL_MESSAGE_TERM(mp) = ERTS_PROC_SIG_MAKE_TAG(ERTS_SIG_Q_OP_PREPEND_MSG,
+                                                  type, 0);
+    ERL_MESSAGE_TOKEN(mp) = token_copy;
+
+    if (type != ERTS_SIG_Q_TYPE_HEAP_FRAG) {
+        /* 2-tuple containing from, and message */
+        ERL_MESSAGE_FROM(mp) = TUPLE2(hp, from, msg_copy);
+    }
+    else {
+        /*
+         * 4-tuple containing from, message,
+         * low halfword of heap frag address, and
+         * high halfword of heap frag address.
+         */
+        Uint low, high;
+        Eterm hfrag_low, hfrag_high;
+#ifdef ARCH_64
+        low = ((UWord) hfrag) & ((UWord) 0xffffffff);
+        high = (((UWord) hfrag) >> 32) & ((UWord) 0xffffffff);
+#else /* ARCH_32 */
+        low = ((UWord) hfrag) & ((UWord) 0xffff);
+        high = (((UWord) hfrag) >> 16) & ((UWord) 0xffff);
+#endif
+        hfrag_low = make_small(low);
+        hfrag_high = make_small(high);
+        ERL_MESSAGE_FROM(mp) = TUPLE4(hp, from, msg_copy,
+                                      hfrag_low, hfrag_high);
+    }
+
+    if (!proc_queue_signal(c_p, to, (ErtsSignal *) mp,
+                           ERTS_SIG_Q_OP_PREPEND_MSG)) {
+        mp->next = NULL;
+        erts_cleanup_messages(mp);
+    }
+
+    ERTS_LC_ASSERT(!(rp_locks & ERTS_PROC_LOCKS_ALL_MINOR));
+    if (c_p != rp && rp_locks)
+        erts_proc_unlock(rp, rp_locks);
+    
+    if (c_p && hsz > ERTS_MSG_COPY_WORDS_PER_REDUCTION) {
+        Uint reds = hsz / ERTS_MSG_COPY_WORDS_PER_REDUCTION;
+        if (reds > CONTEXT_REDS)
+            reds = CONTEXT_REDS;
+        BUMP_REDS(c_p, (int) reds);
+    }
+}
 
 void
 erts_proc_sig_send_persistent_monitor_msg(Uint16 type, Eterm key,
@@ -4763,6 +4975,69 @@ handle_alias_message(Process *c_p, ErtsMessage *sig, ErtsMessage ***next_nm_sig)
     return cnt;
 }
 
+static void
+handle_prepend_message_enqueued_tracing(Process *c_p,
+					ErtsSigRecvTracing *tracing,
+					ErtsMessage *msg);
+
+static int
+handle_prepend_message(Process *c_p, ErtsSigRecvTracing *tracing,
+		       ErtsMessage *sig, ErtsMessage ***next_nm_sig)
+{
+    void *data_attached;
+    Eterm from, msg;
+    int cnt = 0;
+
+    (void) get_prepend_msg_data(sig, &from, &msg, &data_attached);
+
+    ASSERT(is_internal_pid(from));
+
+    remove_nm_sig(c_p, sig, next_nm_sig);
+
+    ERL_MESSAGE_FROM(sig) = from;
+    ERL_MESSAGE_TERM(sig) = msg;
+    sig->data.attached = data_attached;
+
+    if (tracing->messages.active)
+	handle_prepend_message_enqueued_tracing(c_p, tracing, sig);
+
+    /* prepend the message to the message queue... */
+
+    if (!c_p->sig_qs.first) {
+	ASSERT(c_p->sig_qs.last == &c_p->sig_qs.first);
+	c_p->sig_qs.last = &sig->next;
+    }
+    else if (ERTS_SIG_IS_RECV_MARKER(c_p->sig_qs.first)) {
+	ErtsRecvMarker *markp = (ErtsRecvMarker *) c_p->sig_qs.first;
+	markp->prev_next = &sig->next;
+    }
+    sig->next = c_p->sig_qs.first;
+    c_p->sig_qs.first = sig;
+    c_p->sig_qs.len++;
+    erts_msgq_set_save_first(c_p); /* clears set_save if such exists... */
+
+    /* clear all recv markers since they aren't safe to use anymore... */
+
+    if (c_p->sig_qs.recv_mrk_blk) {
+	ErtsRecvMarkerBlock *blkp = c_p->sig_qs.recv_mrk_blk;
+	int ix;
+
+	blkp->old_recv_marker_ix = -1;
+	for (ix = 0; ix < ERTS_RECV_MARKER_BLOCK_SIZE; ix++) {
+	    Eterm id = blkp->ref[ix];
+	    if (id != am_free && id != am_undefined) {
+		blkp->unused++;
+		blkp->ref[ix] = am_undefined;
+		blkp->marker[ix].pass = ERTS_RECV_MARKER_PASS_MAX;
+	    }
+	}
+	cnt += 4;
+    }
+
+    cnt++;
+    erts_proc_notify_new_message(c_p, ERTS_PROC_LOCK_MAIN);
+    return cnt;
+}
 
 /*
  * Called in order to handle incoming signals.
@@ -5299,6 +5574,13 @@ erts_proc_sig_handle_incoming(Process *c_p, erts_aint32_t *statep,
             break;
         }
 
+        case ERTS_SIG_Q_OP_PREPEND_MSG: {
+            ERTS_PROC_SIG_HDBG_PRIV_CHKQ(c_p, &tracing, next_nm_sig);
+            cnt += handle_prepend_message(c_p, &tracing, sig, next_nm_sig);
+            ERTS_PROC_SIG_HDBG_PRIV_CHKQ(c_p, &tracing, next_nm_sig);
+            break;
+        }
+
         case ERTS_SIG_Q_OP_RECV_MARK: {
             ErtsRecvMarker *markp = (ErtsRecvMarker *) sig;
             ASSERT(markp->in_sigq);
@@ -5662,6 +5944,7 @@ erts_proc_sig_handle_exit(Process *c_p, Sint *redsp,
             }
             break;
 
+	case ERTS_SIG_Q_OP_PREPEND_MSG:
         case ERTS_SIG_Q_OP_PERSISTENT_MON_MSG:
         case ERTS_SIG_Q_OP_ALIAS_MSG:
             sig->next = NULL;
@@ -5822,6 +6105,7 @@ clear_seq_trace_token(ErtsMessage *sig)
             }
             break;
 
+	case ERTS_SIG_Q_OP_PREPEND_MSG:
         case ERTS_SIG_Q_OP_PERSISTENT_MON_MSG:
         case ERTS_SIG_Q_OP_DIST_SPAWN_REPLY:
         case ERTS_SIG_Q_OP_ALIAS_MSG:
@@ -5910,6 +6194,7 @@ erts_proc_sig_signal_size(ErtsSignal *sig)
         break;
     }
 
+    case ERTS_SIG_Q_OP_PREPEND_MSG:
     case ERTS_SIG_Q_OP_ALIAS_MSG: {
         ErlHeapFragment *hf;
 
@@ -6245,6 +6530,14 @@ handle_message_enqueued_tracing(Process *c_p,
                       ERL_MESSAGE_TERM(msg),
                       tracing->messages.event);
     }
+}
+
+static void
+handle_prepend_message_enqueued_tracing(Process *c_p,
+					ErtsSigRecvTracing *tracing,
+					ErtsMessage *msg)
+{
+    handle_message_enqueued_tracing(c_p, tracing, msg);
 }
 
 static int
@@ -6654,6 +6947,7 @@ erts_proc_sig_debug_foreach_sig(Process *c_p,
                     }
                     break;
 
+                case ERTS_SIG_Q_OP_PREPEND_MSG:
                 case ERTS_SIG_Q_OP_PERSISTENT_MON_MSG:
                 case ERTS_SIG_Q_OP_ALIAS_MSG:
                     debug_foreach_sig_heap_frags(&sig->hfrag, oh_func, arg);

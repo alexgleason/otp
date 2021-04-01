@@ -2570,7 +2570,8 @@ setup_rootset(Process *p, Eterm *objv, int nobj, Rootset *rootset)
              */
             for (mp = p->sig_inq.first; mp; mp = mp->next) {
                 if ((ERTS_SIG_IS_INTERNAL_MSG(mp) && !mp->data.attached)
-                    || ERTS_SIG_IS_HEAP_ALIAS_MSG(mp)) {
+                    || ERTS_SIG_IS_HEAP_ALIAS_MSG(mp)
+                    || ERTS_SIG_IS_HEAP_PREPEND_MSG(mp)) {
                     int i = ERTS_SIG_IS_INTERNAL_MSG(mp) ? 0 : 1;
                     for (; i < ERL_MESSAGE_REF_ARRAY_SZ; i++) {
                         ASSERT(is_immed(mp->m[i])
@@ -2604,7 +2605,8 @@ setup_rootset(Process *p, Eterm *objv, int nobj, Rootset *rootset)
                     roots[n].sz = ERL_MESSAGE_REF_ARRAY_SZ;
                     n++;
                 }
-                else if (ERTS_SIG_IS_HEAP_ALIAS_MSG(mp)) {
+                else if (ERTS_SIG_IS_HEAP_ALIAS_MSG(mp)
+			 || ERTS_SIG_IS_HEAP_PREPEND_MSG(mp)) {
                     /* Exclude message slot... */
                     roots[n].v = &mp->m[1];
                     roots[n].sz = ERL_MESSAGE_REF_ARRAY_SZ - 1;
@@ -3157,7 +3159,9 @@ static ERTS_INLINE void
 offset_message(ErtsMessage *mp, Sint offs, char* area, Uint area_size)
 {
     Eterm mesg = ERL_MESSAGE_TERM(mp);
-    if (ERTS_SIG_IS_MSG_TAG(mesg) || ERTS_SIG_IS_HEAP_ALIAS_MSG_TAG(mesg)) {
+    if (ERTS_SIG_IS_MSG_TAG(mesg)
+	|| ERTS_SIG_IS_HEAP_ALIAS_MSG_TAG(mesg)
+	|| ERTS_SIG_IS_HEAP_PREPEND_MSG_TAG(mesg)) {
         if (ERTS_SIG_IS_INTERNAL_MSG_TAG(mesg)) {
             switch (primary_tag(mesg)) {
             case TAG_PRIMARY_LIST:
